@@ -16,17 +16,6 @@ for var, val in pairs(uv.os_environ()) do
 end
 table.insert(env, "GIT_TERMINAL_PROMPT=0")
 
-vim.cmd([[
-    command! -bar PaqInstall  lua require('paq'):install()
-    command! -bar PaqUpdate   lua require('paq'):update()
-    command! -bar PaqClean    lua require('paq'):clean()
-    command! -bar PaqSync     lua require('paq'):sync()
-    command! -bar PaqList     lua require('paq').list()
-    command! -bar PaqLogOpen  lua require('paq').log_open()
-    command! -bar PaqLogClean lua require('paq').log_clean()
-    command! -bar -nargs=1 -complete=customlist,v:lua.require'paq'._get_hooks PaqRunHook lua require('paq')._run_hook(<f-args>)
-]])
-
 local function report(op, name, res, n, total)
     local messages = {
         install = { ok = "Installed", err = "Failed to install" },
@@ -291,13 +280,13 @@ local function register(args)
         exists = vim.fn.isdirectory(dir) ~= 0,
         status = "listed", -- TODO: should probably merge this with `exists` in the future...
         pin = args.pin,
-        run = args.run, -- TODO(breaking): Rename
+        run = args.run,    -- TODO(breaking): Rename
         url = url,
     }
 end
 
 -- stylua: ignore
-return setmetatable({
+local paq = setmetatable({
     install = function() exe_op("install", clone, vim.tbl_filter(function(pkg) return not pkg.exists and pkg.status ~= "removed" end, packages)) end,
     update = function() exe_op("update", pull, vim.tbl_filter(function(pkg) return pkg.exists and not pkg.pin end, packages)) end,
     clean = function() exe_op("remove", remove, find_unlisted()) end,
@@ -311,3 +300,15 @@ return setmetatable({
     register = register,
 }, {__call = function(self, tbl) packages = {} vim.tbl_map(register, tbl) return self end,
 })
+
+vim.api.nvim_create_user_command("PaqInstall", function() paq:install() end, { bar = true })
+vim.api.nvim_create_user_command("PaqUpdate", function() paq:update() end, { bar = true })
+vim.api.nvim_create_user_command("PaqClean", function() paq:clean() end, { bar = true })
+vim.api.nvim_create_user_command("PaqSync", function() paq:sync() end, { bar = true })
+vim.api.nvim_create_user_command("PaqList", function() paq.list() end, { bar = true })
+vim.api.nvim_create_user_command("PaqLogOpen", function() paq.log_open() end, { bar = true })
+vim.api.nvim_create_user_command("PaqLogClean", function() paq.log_clean() end, { bar = true })
+vim.api.nvim_create_user_command("PaqRunHook", function(a) paq.run_hook(a.args) end,
+    { bar = true, nargs = 1, complete = paq._get_hooks })
+
+return paq
