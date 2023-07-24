@@ -11,8 +11,7 @@ local packages = {} -- "name" = {options...} pairs
 
 -- This is done only once. Doing it for every process seems overkill
 local env = {}
-local envfn = vim.fn.has("nvim-0.6") == 1 and uv.os_environ or vim.fn.environ
-for var, val in pairs(envfn()) do
+for var, val in pairs(uv.os_environ()) do
     table.insert(env, string.format("%s=%s", var, val))
 end
 table.insert(env, "GIT_TERMINAL_PROMPT=0")
