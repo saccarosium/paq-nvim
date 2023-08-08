@@ -1,20 +1,23 @@
 local uv = vim.loop
+local logpath = vim.fn.has("nvim-0.8") == 1 and vim.fn.stdpath("log") or vim.fn.stdpath("cache")
+local logfile = logpath .. "/paq.log"
+local lockfile = vim.fn.stdpath("state") .. "/paq-lock.json"
+
 local cfg = {
     path = vim.fn.stdpath("data") .. "/site/pack/paqs/",
     opt = false,
     verbose = false,
     url_format = "https://github.com/%s.git",
 }
+
 local status = {
     LISTED = 0,
     INSTALLED = 1,
     UPDATED = 2,
     REMOVED = 3,
 }
-local logpath = vim.fn.has("nvim-0.8") == 1 and vim.fn.stdpath("log") or vim.fn.stdpath("cache")
-local logfile = logpath .. "/paq.log"
-local lockfile = vim.fn.stdpath("data") .. "/paq-lock.json"
-local packages = {} -- "name" = {options...} pairs
+
+local packages = {}
 local lock = {}
 
 -- This is done only once. Doing it for every process seems overkill
@@ -31,8 +34,9 @@ vim.api.nvim_create_user_command("PaqSync", "lua require('paq'):sync()", { bar =
 vim.api.nvim_create_user_command("PaqList", "lua require('paq').list()", { bar = true })
 vim.api.nvim_create_user_command("PaqLogOpen", "lua require('paq').log_open()", { bar = true })
 vim.api.nvim_create_user_command("PaqLogClean", "lua require('paq').log_clean()", { bar = true })
-vim.api.nvim_create_user_command("PaqRunHook", function(a) require'paq'.run_hook(a.args) end,
-    { bar = true, nargs = 1, complete = function() return require'paq'._get_hooks() end })
+-- stylua: ignore
+vim.api.nvim_create_user_command("PaqRunHook", function(a) require("paq").run_hook(a.args) end,
+    { bar = true, nargs = 1, complete = function() return require("paq")._get_hooks() end, })
 
 local function report(op, name, res, n, total)
     local messages = {
@@ -47,6 +51,7 @@ local function report(op, name, res, n, total)
         res == "err" and vim.log.levels.ERROR
     )
 end
+
 
 local function find_unlisted()
     local unlisted = {}
@@ -324,29 +329,28 @@ local function list()
     end
 end
 
-local function register(args)
-    if type(args) == "string" then
-        args = { args }
+local function register(pkg)
+    if type(pkg) == "string" then
+        pkg = { pkg }
     end
-    local url = args.url
-        or (args[1]:match("^https?://") and args[1])    -- [1] is a URL
-        or string.format(cfg.url_format, args[1])       -- [1] is a repository name
-    local name = args.as
-        or url:gsub("%.git$", ""):match("/([%w-_.]+)$") -- Infer name from `url`
+    local url = pkg.url
+        or (pkg[1]:match("^https?://") and pkg[1]) -- [1] is a URL
+        or string.format(cfg.url_format, pkg[1]) -- [1] is a repository name
+    local name = pkg.as or url:gsub("%.git$", ""):match("/([%w-_.]+)$") -- Infer name from `url`
     if not name then
-        return vim.notify(" Paq: Failed to parse " .. vim.inspect(args), vim.log.levels.ERROR)
+        return vim.notify(" Paq: Failed to parse " .. vim.inspect(pkg), vim.log.levels.ERROR)
     end
-    local opt = args.opt or cfg.opt and args.opt == nil
+    local opt = pkg.opt or cfg.opt and pkg.opt == nil
     local dir = cfg.path .. (opt and "opt/" or "start/") .. name
     packages[name] = {
         name = name,
-        branch = args.branch,
+        branch = pkg.branch,
         dir = dir,
         exists = vim.fn.isdirectory(dir) ~= 0,
         status = status.LISTED, -- TODO: should probably merge this with `exists` in the future...
         hash = get_git_hash(dir),
-        pin = args.pin,
-        run = args.run, -- TODO(breaking): Rename
+        pin = pkg.pin,
+        run = pkg.run, -- TODO(breaking): Rename
         url = url,
     }
 end
