@@ -75,31 +75,7 @@ local function find_unlisted()
     return unlisted
 end
 
-local function find_uninstalled()
-    local uninstalled = {}
-    for key, pkg in pairs(packages) do
-        if not lock[key] then
-            table.insert(uninstalled, pkg)
-        end
-    end
-    return vim.tbl_filter(function(pkg) return not pkg.exists end, uninstalled)
-end
-
-
-local function lock_load()
-    -- don't really know why 438 see ':h uv_fs_t'
-    local file = uv.fs_open(lockfile, "r", 438)
-    if file then
-        local stat = assert(uv.fs_fstat(file))
-        local data = assert(uv.fs_read(file, stat.size, 0))
-        assert(uv.fs_close(file))
-        local ok, result = pcall(vim.json.decode, data)
-        return ok and result or {}
-    end
-    return {}
-end
-
-local function state_write()
+local function lock_write()
     local file = uv.fs_open(lockfile, "w", 438)
     if file then
         local ok, result = pcall(vim.json.encode, packages)
@@ -111,8 +87,20 @@ local function state_write()
     end
 end
 
-local function state_diff()
-    return { current = find_uninstalled(), lock = find_unlisted(), }
+local function lock_load()
+    -- don't really know why 438 see ':h uv_fs_t'
+    local file = uv.fs_open(lockfile, "r", 438)
+    if file then
+        local stat = assert(uv.fs_fstat(file))
+        local data = assert(uv.fs_read(file, stat.size, 0))
+        assert(uv.fs_close(file))
+        local ok, result = pcall(vim.json.decode, data)
+        if ok and not vim.tbl_isempty(result) then
+            return result
+        end
+    end
+    lock_write()
+    return vim.deepcopy(packages)
 end
 
 local function new_counter()
@@ -217,7 +205,7 @@ local function log_update_changes(pkg, prev_hash, cur_hash)
         stdio = { nil, stdout, nil },
     }
     local handle
-    handle, _ = uv.spawn('git', options, function(code)
+    handle, _ = uv.spawn("git", options, function(code)
         assert(code == 0, "Exited(" .. code .. ")")
         handle:close()
         local log = uv.fs_open(logfile, "a+", 0x1A4)
@@ -284,7 +272,6 @@ local function rmdir(dir)
     return uv.fs_rmdir(dir)
 end
 
-
 local function remove(p, counter)
     local ok = rmdir(p.dir)
     counter(p.name, ok and "ok" or "err")
@@ -304,18 +291,22 @@ local function exe_op(op, fn, pkgs)
     for _, pkg in pairs(pkgs) do
         fn(pkg, counter)
     end
-    state_write()
-    lock = packages
+    if not vim.deep_equal(packages, lock) then
+        lock_write()
+        lock = vim.deepcopy(packages)
+    end
 end
 
 local function sort_by_name(t)
-    table.sort(t, function(a, b) return a.name < b.name end)
+    table.sort(t, function(a, b)
+        return a.name < b.name
+    end)
 end
 
 -- stylua: ignore
 local function list()
-    local installed = vim.tbl_filter(function(pkg) return pkg.exists end, packages)
-    local removed = vim.tbl_filter(function(pkg) return pkg.status == status.REMOVED end, lock)
+    local installed = vim.tbl_filter(function(p) return p.exists end, lock)
+    local removed = vim.tbl_filter(function(p) return p.status == status.REMOVED end, lock)
     sort_by_name(installed)
     sort_by_name(removed)
     local markers = { "+", "*" }
@@ -359,7 +350,7 @@ end
 return setmetatable({
     install = function() exe_op("install", clone, vim.tbl_filter(function(pkg) return not pkg.exists and pkg.status ~= status.REMOVED end, packages)) end,
     update = function() exe_op("update", pull, vim.tbl_filter(function(pkg) return pkg.exists and not pkg.pin end, packages)) end,
-    clean = function() exe_op("remove", remove, state_diff().lock) end,
+    clean = function() exe_op("remove", remove, find_unlisted()) end,
     sync = function(self) self:clean() exe_op("sync", clone_or_pull, vim.tbl_filter(function(pkg) return pkg.status ~= status.REMOVED end, packages)) end,
     setup = function(self, args) for k, v in pairs(args) do cfg[k] = v end return self end,
     _run_hook = function(name) return run_hook(packages[name]) end,
@@ -368,5 +359,5 @@ return setmetatable({
     log_open = function() vim.cmd("sp " .. logfile) end,
     log_clean = function() return assert(uv.fs_unlink(logfile)) and vim.notify(" Paq: log file deleted") end,
     register = register,
-}, { __call = function(self, tbl) packages = {} lock = lock_load() or packages vim.tbl_map(register, tbl) return self end,
+}, { __call = function(self, tbl) packages = {} vim.tbl_map(register, tbl) lock = lock_load() return self end,
 })
